@@ -21,6 +21,7 @@ logger = logging.getLogger("amy.llm")
 _client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=settings.nvidia_api_key,
+    
     default_headers={
         "HTTP-Referer": "https://github.com/amy-bot",
         "X-Title": "Amy Bot",
@@ -31,12 +32,16 @@ _client = OpenAI(
 # If one hits rate limit or 404, automatically moves to next.
 # Last entry is openrouter/free — always works as final fallback.
 NVIDIA_MODELS = [
-    "meta-llama/llama-3.3-70b-instruct:free",        # 1st: best quality free
-    "mistralai/mistral-small-3.2-24b-instruct:free",  # 2nd: strong, reliable
-    "deepseek/deepseek-r1-0528:free",                 # 3rd: great reasoning
-    "qwen/qwen3-30b-a3b:free",                        # 4th: good Persian support
-    "meta-llama/llama-3.1-8b-instruct:free",          # 5th: fast lightweight
-    "openrouter/free",                                # 6th: auto-picks any free model
+    "google/gemma-3n-e4b-it:free",
+
+    "google/gemma-3-12b-it:free",
+
+    "meta-llama/llama-3.1-8b-instruct:free",
+
+    "qwen/qwen2.5-7b-instruct:free",
+
+    "microsoft/phi-4-reasoning-plus:free",
+
 ]
 
 # Vision: use the free router with vision support filter
@@ -58,7 +63,7 @@ def chat(
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
-                timeout=30,
+                timeout=12,
             )
             logger.info("OpenRouter model used: %s", model)
             return completion.choices[0].message.content.strip()
@@ -108,7 +113,7 @@ def vision_describe(image_b64: str, question: str = "") -> str:
                 ],
             }],
             max_tokens=400,
-            timeout=25,
+            timeout=12,
         )
         return completion.choices[0].message.content.strip()
     except Exception as e:
