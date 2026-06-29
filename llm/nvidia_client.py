@@ -1,9 +1,15 @@
 """
-llm/nvidia_client.py — NVIDIA NIM API client.
+llm/nvidia_client.py — OpenRouter LLM client with automatic model fallback.
 
-vision_ask(): sends image + specific question directly to vision model.
-              The vision model answers the question itself (not just describes).
-chat():       text chat with fallback across free models.
+OpenRouter:
+  - No phone number, no credit card — email only
+  - 20+ free models, one key, OpenAI-compatible endpoint
+  - Sign up: https://openrouter.ai  →  Keys  →  Create Key
+  - Free models are identified by the ":free" suffix
+
+Rate limits on free tier (as of 2026):
+  - 20 RPM, 50 req/day without credits
+  - 20 RPM, 1000 req/day with $10+ credits loaded (optional)
 """
 import logging
 import time
@@ -13,27 +19,40 @@ from config import settings
 logger = logging.getLogger("amy.llm")
 
 _client = OpenAI(
-    base_url="https://integrate.api.nvidia.com/v1",
-    api_key=settings.nvidia_api_key,
+    base_url="https://openrouter.ai/api/v1",
+    api_key=settings.nvidia_api_key,          # reuses same env var — just set NVIDIA_API_KEY=sk-or-...
+    default_headers={
+        "HTTP-Referer": "https://github.com/amy-bot",   # required by OpenRouter (any URL is fine)
+        "X-Title": "Amy Bot",
+    },
 )
 
+# ── Free model priority list ───────────────────────────────────────────────────
+# All end with :free — tried in order, moves to next on rate limit / error
+# Ordered: best chat quality first, lightweight fallbacks last
 NVIDIA_MODELS = [
-    "meta/llama-3.3-70b-instruct",
-    "mistralai/mistral-large-2-instruct",
-    "nvidia/llama-3.3-nemotron-super-49b-v1",
-    "google/gemma-3-27b-it",
-    "moonshotai/kimi-k2-instruct",
-    "meta/llama-3.1-8b-instruct",
+    "google/gemini-2.0-flash-exp:free",          # 1st: Gemini 2.0, fast + smart
+    "meta-llama/llama-3.3-70b-instruct:free",    # 2nd: Llama 3.3 70B, great quality
+    "mistralai/mistral-small-3.2-24b-instruct:free",  # 3rd: Mistral 24B, strong
+    "deepseek/deepseek-r1-0528:free",            # 4th: DeepSeek R1, reasoning
+    "qwen/qwen3-30b-a3b:free",                   # 5th: Qwen3, multilingual/Persian
+    "microsoft/phi-4-reasoning:free",            # 6th: Phi-4, reasoning
+    "meta-llama/llama-3.1-8b-instruct:free",     # 7th: lightweight last resort
 ]
 
-VISION_MODEL = "meta/llama-3.2-11b-vision-instruct"
+# Vision model — for image analysis
+VISION_MODEL = "google/gemini-2.0-flash-exp:free"   # Gemini supports vision on free tier
 
 
 def chat(
     messages: list[dict],
-    max_tokens: int | None = None,
-    temperature: float | None = None,
+    max_tokens: int = None,
+    temperature: float = None,
 ) -> str:
+    """
+    Calls OpenRouter with automatic fallback across all free models.
+    Returns the assistant's raw text response.
+    """
     max_tokens  = max_tokens  or settings.llm_max_tokens
     temperature = temperature or settings.llm_temperature
 
@@ -44,87 +63,100 @@ def chat(
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
-                timeout=25,
+                timeout=30,
             )
-            logger.info("NIM chat model: %s", model)
+            logger.info("OpenRouter model used: %s", model)
             return completion.choices[0].message.content.strip()
+
         except RateLimitError:
-            logger.warning("Rate limit: %s", model)
-            time.sleep(0.3)
+            logger.warning("Rate limit on %s — trying next model", model)
+            time.sleep(0.5)
+            continue
+
         except APITimeoutError:
-            logger.warning("Timeout: %s", model)
+            logger.warning("Timeout on %s — trying next model", model)
+            continue
+
         except APIStatusError as e:
-            if e.status_code in (429, 503, 502):
-                logger.warning("HTTP %d: %s", e.status_code, model)
-            else:
-                logger.error("API error on %s: %s", model, e)
-                break
+            if e.status_code in (429, 503, 502, 529):
+                logger.warning("HTTP %d on %s — trying next model", e.status_code, model)
+                time.sleep(0.3)
+                continue
+            logger.error("API error on %s: %s", model, e)
+            break
+
         except Exception as e:
             err = str(e).lower()
-            if any(k in err for k in ("rate_limit", "429", "quota", "too many", "timeout")):
-                logger.warning("Soft limit: %s", model)
-            else:
-                logger.error("Unexpected on %s: %s", model, e)
-                break
+            if any(k in err for k in ("rate_limit", "429", "quota", "too many", "timeout", "overload")):
+                logger.warning("Soft rate limit on %s — trying next model", model)
+                continue
+            logger.error("Unexpected error on %s: %s", model, e)
+            break
 
     return "emotion: worried\nSomething went wrong... try again in a moment."
 
 
-def vision_ask(image_b64: str, question: str, language_hint: str = "en") -> str:
+def vision_describe(image_b64: str, question: str = "") -> str:
     """
-    Sends the image + the user's ACTUAL question to the vision model.
-    The vision model answers directly — not just describes.
-
-    language_hint: 'fa' for Persian, 'en' for English.
+    Uses vision model to analyze an image.
+    If a specific question is provided, answers that question directly.
+    Otherwise gives a description.
+    image_b64: base64-encoded JPEG/PNG string.
     """
-    lang_instruction = (
-        "پاسخ را به فارسی بده." if language_hint == "fa"
-        else "Answer in English."
+    prompt = question if question else (
+        "Describe the main contents of this image in 2-3 sentences. "
+        "Be specific — mention objects, people, places, text, colors, style."
     )
-
-    system_msg = (
-        "You are Amy, a helpful and sharp AI assistant. "
-        "You are looking at an image the user sent. "
-        "Answer the user's question about the image directly and accurately. "
-        "If you see a car, identify the make/model/year if possible. "
-        "If you see code, explain what's wrong or what it does. "
-        "If you see food, identify it. "
-        "Be specific and factual. Stay in character as Amy (tsundere, concise). "
-        f"{lang_instruction}"
-    )
-
-    user_content = [
-        {
-            "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
-        },
-        {
-            "type": "text",
-            "text": question if question else (
-                "این عکس چیه؟ توضیح بده." if language_hint == "fa"
-                else "What is in this image? Describe and identify everything you see."
-            ),
-        },
-    ]
 
     try:
         completion = _client.chat.completions.create(
             model=VISION_MODEL,
-            messages=[
-                {"role": "system", "content": system_msg},
-                {"role": "user",   "content": user_content},
-            ],
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
+                    },
+                    {
+                        "type": "text",
+                        "text": prompt,
+                    },
+                ],
+            }],
             max_tokens=400,
             timeout=25,
         )
-        result = completion.choices[0].message.content.strip()
-        logger.info("Vision answer (%d chars): %s...", len(result), result[:60])
-        return result
+        return completion.choices[0].message.content.strip()
     except Exception as e:
-        logger.error("vision_ask error: %s", e)
+        logger.error("vision_describe error: %s", e)
         return ""
 
 
-# Keep old name as alias for any remaining callers
-def vision_describe(image_b64: str) -> str:
-    return vision_ask(image_b64, "Describe what you see in this image in detail.")
+def vision_ask(image_b64: str, question: str, lang: str = "en") -> str:
+    """
+    Ask the vision model a specific question about an image.
+    Returns the model's direct answer (not wrapped in Amy's personality).
+
+    lang: "fa" or "en" — used to ask the question in the right language.
+    """
+    if question:
+        if lang == "fa":
+            prompt = f"به این سوال درباره تصویر به فارسی پاسخ بده: {question}"
+        else:
+            prompt = (
+                f"Answer this question about the image directly and specifically: {question}\n"
+                "Be concrete — if it's a car, name the make/model/year. "
+                "If it's code, identify the exact bug. "
+                "If it's a place, name it. If it's food, name the dish."
+            )
+    else:
+        prompt = (
+            "Describe what you see in this image in 2-3 sentences. "
+            "Be specific: objects, people, places, text, colors, style, mood."
+        )
+
+    result = vision_describe(image_b64, prompt)
+    if not result:
+        return "نتونستم تصویر رو آنالیز کنم." if lang == "fa" else "Couldn't analyze the image."
+    return result
