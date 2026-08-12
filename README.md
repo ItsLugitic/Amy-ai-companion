@@ -8,10 +8,6 @@
 
 وارد گروه تلگرام شو
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Python-3.11+-blue?logo=python"/>
-  <img src="https://img.shields.io/badge/Railway-Ready-purple"/>
-</p>
 
 <p align="center">
   <a href="https://discord.gg/yourinvite](https://discord.com/invite/JT4NMvHwr">
