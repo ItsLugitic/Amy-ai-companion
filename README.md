@@ -1,233 +1,155 @@
-<p align="center">
-  <img src="https://img.shields.io/badge/Python-3.11+-blue?logo=python"/>
-  <img src="https://img.shields.io/badge/Telegram-AI%20Bot-26A5E4?logo=telegram"/>
-  <img src="https://img.shields.io/badge/Railway-Ready-purple"/>
-  <img src="https://img.shields.io/badge/License-MIT-green"/>
-</p>
-می‌خوای همین الان با Amy صحبت کنی؟
+# Amy v5 — Modular Tsundere AI Bot
 
-وارد گروه تلگرام شو
+A Telegram bot with personality, per-chat shared memory, multi-tool support,
+media (photo/sticker/GIF/video) understanding, and passive group listening.
 
+## Architecture
 
-<p align="center">
-  <a href="https://discord.gg/yourinvite](https://discord.com/invite/JT4NMvHwr">
-    <img src="https://img.shields.io/badge/Discord-Community-5865F2?logo=discord&logoColor=white"/>
-  </a>
-</p>
-<p align="center">
-  <a href="https://t.me/+QP3G3mc93xNlMTRk">
-    <img src="https://img.shields.io/badge/Try%20Amy%20Live-Telegram-26A5E4?style=for-the-badge&logo=telegram&logoColor=white"/>
-  </a>
-</p>
-
-
-# 🤍 Amy — دستیار هوشمند تلگرام
-
-یک **همراه هوشمند برای تلگرام** با حافظه بلندمدت، درک تصویر، تحلیل فایل، ابزارهای وب و مکالمه‌های مبتنی بر شخصیت.
-
-طوری طراحی شده که فقط یک چت‌بات معمولی نباشه؛ بلکه مثل یک همراه رفتار کنه که میتونه مکالمات مهم رو به خاطر بسپره، تصاویر و فایل هارو درک کنه
-
----
-
-## ✨ قابلیت‌ها
-
-* 🧠 **حافظه بلندمدت** با استفاده از ChromaDB
-* 👁️ **درک و تحلیل تصویر** (اسکرین‌شات، عکس، میم، رابط کاربری و …)
-* 📄 **تحلیل فایل** برای PDF، DOCX، TXT و سایر فرمت‌های پشتیبانی‌شده
-* 🌐 **جستجوی وب** با سیستم جایگزین خودکار در صورت خطا
-* 🖼️ **تولید تصویر** برای ساخت والپیپر، آرت و تصاویر سفارشی
-* 💬 **پشتیبانی از چت خصوصی و گروهی**
-* 🎭 **سیستم شخصیت و احساسات پویا**
-* ⚙️ **معماری ماژولار و قابل توسعه**
-* 🚀 **آماده‌ی استقرار روی Railway**
-
----
-
-## 🏗️ معماری پروژه
-
-```text
-پیام کاربر
-    ↓
-هندلر تلگرام
-    ↓
-Brain.process()
-    ↓
-بازیابی حافظه (ChromaDB)
-    ↓
-ساخت Context
-    ↓
-مسیریاب مدل‌های زبانی (OpenRouter / مدل‌های جایگزین)
-    ↓
-تحلیل پاسخ مدل
-    ↓
-اجرای ابزارها (وب / تصویر / فایل / ویژن)
-    ↓
-ارسال پاسخ به تلگرام
 ```
-
----
-
-## 📂 ساختار پروژه
-
-```text
 amy/
-├── main.py
-├── config.py
+├── main.py              ← Entry point
+├── config.py             ← All settings from env vars
 ├── requirements.txt
-├── railway.json
+├── railway.json          ← Railway deployment config
 ├── .env.example
 │
 ├── core/
-├── handlers/
+│   ├── brain.py          ← Central orchestrator (User → Brain → Tool → LLM → Telegram)
+│   ├── parser.py         ← LLM output parser (emotion, action, text)
+│   ├── conversation.py   ← Chat-scoped message history (shared in groups, tagged by sender)
+│   ├── emotion_engine.py ← Tracks Amy's emotional state per chat
+│   └── language.py       ← Language detection (fa / en)
+│
 ├── llm/
+│   └── groq_client.py    ← Groq API wrapper (chat / fast_chat / vision)
+│
 ├── memory/
-├── models/
-├── personalities/
-├── storage/
+│   └── manager.py        ← ChromaDB long-term memory, per person (save + retrieve)
+│
 ├── tools/
-└── utils/
+│   ├── web_search.py     ← SerpAPI / DuckDuckGo search
+│   ├── image_search.py   ← Pixabay photo search
+│   └── image_generate.py ← Pollinations.ai image generation
+│
+├── handlers/
+│   └── bot.py             ← Telegram handlers, passive-listening logic, result dispatcher
+│
+├── personalities/
+│   └── amy.py             ← System prompt + few-shot examples
+│
+├── utils/
+│   └── media.py            ← Sticker/GIF/video → single JPEG frame (for vision)
+│
+└── models/
+    └── schemas.py          ← Shared data models (Emotion, Action, ParsedResponse, UserContext, ...)
 ```
 
----
+## Flow
 
-## 🚀 شروع سریع
-
-### 1. کلون کردن پروژه
-
-```bash
-git clone https://github.com/ItsLugitic/amy-telegram-bot.git
-cd amy-telegram-bot
+```
+Telegram update
+    ↓
+Addressed to Amy (mention/reply)?
+    ├── yes → Brain.process() / process_image() → LLM → parse_response() → deliver (quoted reply)
+    │
+    └── no (group only) → passive-listening gate:
+            cheap checks (length/cooldown/random) → Brain.should_engage() [fast model]
+                ├── no  → Brain.observe() — stored in shared history, no reply
+                └── yes → Brain.process(spontaneous=True) → deliver (plain message, no quote)
 ```
 
-### 2. ساخت محیط مجازی
+History is keyed by **chat_id**, not user_id — in a group, every member sees
+and is seen in ONE shared conversation (tagged `Name: message`), which is
+what lets Amy connect something said by one person to something a different
+person does later. Long-term memory (ChromaDB) stays per-person.
 
-```bash
-python -m venv .venv
+## Setup
 
-# ویندوز
-.venv\\Scripts\\activate
-
-# لینوکس / مک
-source .venv/bin/activate
-```
-
-### 3. نصب وابستگی‌ها
+### 1. Install
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. تنظیم متغیرهای محیطی
+### 2. Configure environment
 
-یک فایل `.env` بر اساس `.env.example` بساز:
-
-```env
-TELEGRAM_TOKEN=your_telegram_bot_token
-OPENROUTER_API_KEY=your_openrouter_api_key
-PIXABAY_API_KEY=your_pixabay_api_key
-SERPAPI_KEY=optional_serpapi_key
+```bash
+cp .env.example .env
+# Fill in your keys in .env
 ```
 
-### 5. اجرای ربات
+Required:
+- `TELEGRAM_TOKEN` — from @BotFather
+- `GROQ_API_KEY` — free, from console.groq.com/keys
+  (or `GROQ_API_KEYS=key1,key2,key3` — comma-separated, for multiple free
+  accounts. When one key hits its rate limit, calls rotate to the next key
+  for the *same* model — the model never changes on its own, so personality
+  and reply quality stay identical regardless of which key is active)
+
+Optional:
+- `GROQ_CHAT_MODEL` (default `openai/gpt-oss-120b`) — main personality model
+- `GROQ_FAST_MODEL` (default `openai/gpt-oss-20b`) — cheap model used only for
+  the passive "should I jump in?" gate, on its own separate free-tier quota
+- `GROQ_VISION_MODEL` (default `qwen/qwen3.6-27b`) — the only Groq model with
+  vision support right now
+- `PASSIVE_LISTENING_ENABLED` (default `true`) — set `false` to make Amy
+  fully reactive again (only mention/reply triggers her)
+- `PASSIVE_PRECHECK_PROBABILITY` (default `0.25`) — chance an eligible
+  message even gets sent to the fast-model gate
+- `PASSIVE_COOLDOWN_SECONDS` (default `45`) — minimum gap between two
+  spontaneous replies in the same chat
+- `MODERATION_ENABLED` (default `true`) — Amy can mute/ban whoever sent a
+  genuinely abusive message directed at her. The target is always locked to
+  the real sender of the message being processed — never something the model
+  can redirect. An outright ban only actually happens after
+  `MODERATION_BAN_AFTER_STRIKES` offenses (default `4`); before that, a
+  requested ban is downgraded to an escalating mute
+  (`MODERATION_MUTE_MINUTES`, default `5,30,180`). Strikes decay after
+  `MODERATION_STRIKE_RESET_HOURS` (default `72`). Group admins/the creator
+  are never touched. Every action is posted in the group, never silent.
+- `MUTE_DEFAULT_MINUTES` / `MUTE_MAX_MINUTES` (default `10` / `180`) — clamp
+  for a single mute Amy requests directly (not a downgraded ban)
+- `SERPAPI_KEY` — better web search (falls back to DuckDuckGo if missing)
+- `PIXABAY_API_KEY` — real photo search (send_image action)
+
+Groq retires model IDs on fairly short notice — if requests start failing,
+check https://console.groq.com/docs/deprecations for the current
+recommended replacement and set the matching env var above.
+
+### 3. Give the bot group admin rights (required for both features below)
+
+**Passive listening** — in @BotFather: your bot → **Bot Settings → Group
+Privacy → Turn off**. Without this, Telegram never forwards messages that
+don't @mention or reply to Amy, so she can only ever be reactive in groups.
+
+**Moderation (mute/ban)** — in the actual Telegram group: promote the bot to
+**admin** and grant it **"Restrict members"** and **"Ban users"**. Without
+this, moderation calls just fail gracefully (Amy posts a note saying she's
+not an admin yet, instead of silently doing nothing).
+
+### 4. Run
 
 ```bash
 python main.py
 ```
 
----
+### Deploy to Railway
 
-## 🚂 استقرار روی Railway
+1. Push to GitHub
+2. Connect repo on railway.app
+3. Set env vars in Railway dashboard
+4. Deploy — `railway.json` handles the rest
 
-1. پروژه را روی GitHub قرار بده
-2. یک پروژه جدید در Railway بساز
-3. ریپوی GitHub را متصل کن
-4. متغیرهای محیطی لازم را اضافه کن
-5. Deploy را اجرا کن — فایل `railway.json` به‌صورت خودکار برنامه را اجرا می‌کند
+## Commands
 
----
+| Command  | Description                                    |
+|----------|-------------------------------------------------|
+| /start   | Wake Amy up                                      |
+| /reset   | Clear this chat's conversation history (shared group history included) |
 
-## 🧩 ابزارهای پشتیبانی‌شده
+## Adding New Tools
 
-| ابزار        | توضیح                             |
-| ------------ | --------------------------------- |
-| جستجوی وب    | جستجوی اطلاعات به‌روز در اینترنت  |
-| جستجوی تصویر | پیدا کردن تصاویر واقعی با Pixabay |
-| تولید تصویر  | ساخت آرت و والپیپر سفارشی         |
-| ویژن         | تحلیل تصاویر و اسکرین‌شات‌ها      |
-| خواندن فایل  | خلاصه‌سازی و تحلیل اسناد          |
-| آب‌وهوا      | دریافت وضعیت فعلی هوا             |
-| نقشه         | ابزارهای ساده موقعیت و نقشه       |
-| ترجمه        | ترجمه بین زبان‌ها                 |
-| یوتیوب       | جستجوی ویدئوهای YouTube           |
-| ویکی‌پدیا    | دریافت خلاصه مقالات ویکی‌پدیا     |
-
----
-
-## 💬 دستورات ربات
-
-| دستور    | توضیح                  |
-| -------- | ---------------------- |
-| `/start` | فعال کردن Amy          |
-| `/reset` | پاک کردن تاریخچه گفتگو |
-
----
-
-## 🧠 سیستم شخصیت
-
-Amy از یک ماژول اختصاصی شخصیت استفاده می‌کند که این موارد را کنترل می‌کند:
-
-* وضعیت احساسی
-* سبک گفتگو
-* شوخی و رفتار بازیگوشانه
-* ارجاع طبیعی به حافظه‌ها
-* قوانین استفاده از ابزارها
-* ثبات زبانی در مکالمه
-
-شخصیت Amy را می‌توان در فایل `personalities/amy.py` سفارشی‌سازی کرد.
-
----
-
-## ➕ اضافه کردن ابزار جدید
-
-1. یک ماژول جدید داخل `tools/` بساز
-2. تابع async `run()` را پیاده‌سازی کن
-3. اکشن را در `models/schemas.py` ثبت کن
-4. منطق اجرای آن را در `core/brain.py` اضافه کن
-5. در صورت نیاز، قوانین مربوط به آن ابزار را به پرامپت شخصیت اضافه کن
-
----
-
-## 📸 نمونه استفاده‌ها
-
-* تحلیل اسکرین‌شات بازی‌ها
-* خلاصه‌سازی فایل PDF
-* ساخت والپیپر به سبک انیمه
-* جستجوی اخبار و اطلاعات جدید در وب
-* به خاطر سپردن سلیقه و ترجیحات کاربر
-* گفتگو طبیعی در گروه‌های تلگرام هنگام منشن شدن
-
----
-
-## 🛡️ نکات امنیتی
-
-هرگز فایل واقعی `.env` یا کلیدهای API را داخل ریپو Commit نکن.
-
-پروژه شامل `.env.example` است تا تنظیمات به‌صورت امن با دیگران به اشتراک گذاشته شود.
-
----
-
-## 📜 لایسنس
-
-این پروژه تحت **لایسنس MIT** منتشر می‌شود.
-
----
-
-## 👨‍💻 سازنده
-
-**Matin (ItsLugitic)**
-
-در حال توسعه **Amy** به‌عنوان یک همراه هوشمند متن‌باز با تمرکز بر **شخصیت، حافظه، ویژن و قابلیت توسعه**.
-
----
-
-> *«دارم Amy را قابلیت‌به‌قابلیت می‌سازم.»* 🤍
+1. Create `tools/your_tool.py` with an async function
+2. Add a new `ActionType` in `models/schemas.py`
+3. Handle the new type in `core/brain.py` → `_execute_single_action()`
+4. Add it to the system prompt in `personalities/amy.py`

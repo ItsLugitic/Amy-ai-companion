@@ -16,11 +16,11 @@ _NEGATIVE_WORDS = {"hate", "stupid", "dumb", "ugly", "bad", "بد", "احمق", 
 _EMOTIONAL_WORDS = {"scared", "sad", "cry", "lonely", "hurt", "upset", "ترسیدم", "غمگین", "تنها"}
 
 
-def get_state(user_id: int) -> Emotion:
-    return _states.get(user_id, Emotion.TSUNDERE)
+def get_state(chat_id: int) -> Emotion:
+    return _states.get(chat_id, Emotion.TSUNDERE)
 
 
-def update_state(user_id: int, new_emotion: Emotion, user_text: str = "") -> Emotion:
+def update_state(chat_id: int, new_emotion: Emotion, user_text: str = "") -> Emotion:
     """
     Updates Amy's emotional state based on the LLM's chosen emotion
     and optionally nudges it based on user sentiment.
@@ -33,10 +33,10 @@ def update_state(user_id: int, new_emotion: Emotion, user_text: str = "") -> Emo
         # Amy gets worried/caring when user seems distressed
         new_emotion = Emotion.WORRIED
 
-    _states[user_id] = new_emotion
-    logger.debug("Emotion for user %d: %s", user_id, new_emotion)
+    _states[chat_id] = new_emotion
+    logger.debug("Emotion for chat %d: %s", chat_id, new_emotion)
     return new_emotion
 
 
-def reset_state(user_id: int) -> None:
-    _states.pop(user_id, None)
+def reset_state(chat_id: int) -> None:
+    _states.pop(chat_id, None)

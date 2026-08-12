@@ -15,6 +15,7 @@ import asyncio
 import logging
 from typing import Optional
 
+from config import settings
 import core.conversation as conv
 import core.emotion_engine as emotions
 from core.parser import parse_response
@@ -23,12 +24,18 @@ from models import (
     ParsedResponse, ActionType, Action,
     ToolResult, BrainResult, UserContext, Emotion,
 )
+from personalities import FEW_SHOT_EXAMPLES
 from utils.datetime_utils import get_datetime_in_words
 import llm
 
 logger = logging.getLogger("amy.brain")
 
 MAX_AGENT_ITERATIONS = 3   # safety cap on tool loops
+
+# Seeded few-shot content, so should_engage's "recent messages" summary can
+# skip them — they're personality demonstrations, not things anyone actually
+# just said in the chat.
+_FEW_SHOT_CONTENTS = {m["content"] for m in FEW_SHOT_EXAMPLES}
 
 
 class Brain:
@@ -39,18 +46,42 @@ class Brain:
     #  Public entry points
     # ══════════════════════════════════════════════════════
 
-    async def process(self, ctx: UserContext, user_text: str) -> BrainResult:
+    async def process(
+        self,
+        ctx: UserContext,
+        user_text: str,
+        sender_name: str = "",
+        reply_context: str = "",
+        spontaneous: bool = False,
+    ) -> BrainResult:
+        """
+        sender_name   — who said this (tags the turn; matters in groups).
+        reply_context — e.g. "[In reply to Ali: 'blah']" prepended for the LLM,
+                        kept out of `user_text` itself (which tools still see clean).
+        spontaneous   — True when Amy is jumping in on her own, not because she
+                        was addressed. Changes how the turn is framed for the LLM.
+        """
         uid  = ctx.user_id
+        cid  = ctx.chat_id or uid
         lang = "fa" if _is_persian(user_text) else "en"
 
-        # 1. Memory
+        # 1. Memory (long-term memory stays per-person even in a shared chat)
         memories = self.memory.retrieve_relevant(uid, user_text)
         timestamp = get_datetime_in_words()
+        body = f"{reply_context}\n{user_text}" if reply_context else user_text
         contextual = (
-            f"--- MEMORY ---\n{memories}\n--------------\n{timestamp} - {user_text}"
-        ) if memories else f"{timestamp} - {user_text}"
+            f"--- MEMORY ---\n{memories}\n--------------\n{timestamp} - {body}"
+        ) if memories else f"{timestamp} - {body}"
 
-        conv.append(uid, "user", contextual)
+        if spontaneous:
+            contextual += (
+                "\n\n[No one addressed you directly — you noticed this in the group "
+                "and decided to jump in on your own. Keep it short and natural, like "
+                "a real person casually chiming in. Only comment on what's actually "
+                "relevant or funny.]"
+            )
+
+        conv.append(cid, "user", contextual, sender_name=sender_name)
 
         # 2. Agent loop
         result = await self._agent_loop(ctx, user_text, lang)
@@ -61,50 +92,112 @@ class Brain:
         )
         return result
 
+    async def should_engage(self, ctx: UserContext, sender_name: str, trigger_text: str) -> bool:
+        """
+        Cheap yes/no gate for passive group listening, run on the small/fast
+        model so it never eats into the main personality model's quota.
+        Looks at a little recent shared history for context.
+        """
+        cid = ctx.chat_id
+        recent = conv.snapshot(cid)[-12:]
+        recent_text = "\n".join(
+            f"- {m['content']}" for m in recent
+            if m["role"] == "user" and m["content"] not in _FEW_SHOT_CONTENTS
+        ) or "(nothing yet)"
+
+        prompt = (
+            "You are a filter deciding whether Amy — a witty, tsundere group-chat "
+            "persona — should spontaneously jump into a group conversation, without "
+            "being addressed or replied to. She should do this rarely: only when "
+            "there is a genuinely funny reaction, a callback to something said "
+            "earlier, or something clearly worth teasing someone about. For routine, "
+            "boring, or unrelated chatter, she should stay quiet.\n\n"
+            f"Recent messages:\n{recent_text}\n\n"
+            f"Newest message — {sender_name or 'someone'}: {trigger_text}\n\n"
+            "Should Amy jump in right now? Answer with exactly one word: yes or no."
+        )
+        loop = asyncio.get_event_loop()
+        raw = await loop.run_in_executor(
+            None, llm.fast_chat, [{"role": "user", "content": prompt}]
+        )
+        decision = raw.strip().lower().startswith("y")
+        logger.info("should_engage(chat=%s): %s -> %s", cid, raw.strip()[:20], decision)
+        return decision
+
+    def observe(self, ctx: UserContext, sender_name: str, text: str) -> None:
+        """
+        Passively records a group message Amy isn't responding to, so later
+        (triggered or spontaneous) replies can still reference it.
+        """
+        cid = ctx.chat_id
+        if not cid or not text:
+            return
+        conv.append(cid, "user", text, sender_name=sender_name)
+        conv.trim(cid)
+
     async def process_image(
         self,
         ctx: UserContext,
         image_b64: str,
         question: str = "",
+        sender_name: str = "",
+        spontaneous: bool = False,
+        media_kind: str = "image",
     ) -> BrainResult:
         """
-        Vision: the vision model answers the question directly.
-        Amy's personality is then layered on top.
+        Vision: the vision model answers/describes first, then Amy's
+        personality is layered on top.
+
+        `media_kind` — "image" | "sticker" | "gif" | "video" — only affects
+        the wording of the prompt (e.g. "sent a sticker" vs "sent an image").
+        `spontaneous` — True for a media message Amy is reacting to on her own
+        (e.g. a GIF nobody addressed her with) — mirrors the group-jump-in
+        framing used in process().
         """
-        uid  = ctx.user_id
+        cid  = ctx.chat_id or ctx.user_id
         lang = "fa" if _is_persian(question) else "en"
 
         loop = asyncio.get_event_loop()
 
-        # Vision model answers the actual question
+        # Vision model answers/describes the frame
         vision_answer = await loop.run_in_executor(
             None, llm.vision_ask, image_b64, question or "", lang
         )
         logger.info("Vision answer: %s...", vision_answer[:80])
 
+        noun = {"sticker": "a sticker", "gif": "a GIF", "video": "a video"}.get(media_kind, "an image")
+
         # Build prompt for Amy to react/wrap in personality
         if question:
             prompt = (
-                f"The user sent an image and asked: '{question}'\n\n"
-                f"You analyzed the image and found:\n{vision_answer}\n\n"
+                f"The user sent {noun} and asked: '{question}'\n\n"
+                f"You analyzed it and found:\n{vision_answer}\n\n"
                 "Respond as Amy: give the answer naturally in your personality. "
                 "Be direct and specific. If it's a car — name it. "
                 "If it's code — explain the bug. Keep it concise."
             )
         else:
             prompt = (
-                f"The user sent you an image. You see:\n{vision_answer}\n\n"
-                "React to this image naturally in your personality. Keep it short."
+                f"The user sent you {noun}. You see:\n{vision_answer}\n\n"
+                "React to it naturally in your personality. Keep it short."
             )
 
-        conv.append(uid, "user", prompt)
-        history = conv.snapshot(uid)
+        if spontaneous:
+            prompt += (
+                "\n\n[Nobody addressed you — you're reacting to this on your own, "
+                "like a real group member spontaneously commenting or making a "
+                "joke/callback. Keep it very short and only reply if it's actually "
+                "worth reacting to.]"
+            )
+
+        conv.append(cid, "user", prompt, sender_name=sender_name)
+        history = conv.snapshot(cid)
         raw = await loop.run_in_executor(None, llm.chat, history)
         parsed = parse_response(raw)
 
-        conv.append(uid, "assistant", raw)
-        conv.trim(uid)
-        emotions.update_state(uid, parsed.emotion)
+        conv.append(cid, "assistant", raw)
+        conv.trim(cid)
+        emotions.update_state(cid, parsed.emotion)
 
         return BrainResult(parsed=parsed)
 
@@ -114,10 +207,12 @@ class Brain:
         file_bytes: bytes,
         filename: str,
         question: str = "",
+        sender_name: str = "",
     ) -> BrainResult:
         from tools.file_reader import extract_text, describe_file
 
         uid  = ctx.user_id
+        cid  = ctx.chat_id or uid
         loop = asyncio.get_event_loop()
         fa   = _is_persian(question + filename)
 
@@ -151,14 +246,14 @@ class Brain:
                 "Stay in character."
             )
 
-        conv.append(uid, "user", prompt)
-        history = conv.snapshot(uid)
+        conv.append(cid, "user", prompt, sender_name=sender_name)
+        history = conv.snapshot(cid)
         raw = await loop.run_in_executor(None, llm.chat, history, 1000)
         parsed = parse_response(raw)
 
-        conv.append(uid, "assistant", raw)
-        conv.trim(uid)
-        emotions.update_state(uid, parsed.emotion)
+        conv.append(cid, "assistant", raw)
+        conv.trim(cid)
+        emotions.update_state(cid, parsed.emotion)
         asyncio.create_task(
             self._save_memory(uid, f"[file:{filename}] {question}", parsed.text)
         )
@@ -181,23 +276,23 @@ class Brain:
           - LLM returns no actions (final answer)
           - Max iterations reached
         """
-        uid           = ctx.user_id
+        cid           = ctx.chat_id or ctx.user_id
         loop          = asyncio.get_event_loop()
         all_tool_results: list[ToolResult] = []
         final_parsed: Optional[ParsedResponse] = None
 
         for iteration in range(MAX_AGENT_ITERATIONS):
-            history = conv.snapshot(uid)
+            history = conv.snapshot(cid)
             raw     = await loop.run_in_executor(None, llm.chat, history)
             logger.debug("Agent iter %d LLM raw:\n%s", iteration, raw[:200])
 
             parsed = parse_response(raw)
-            emotions.update_state(uid, parsed.emotion, original_text)
+            emotions.update_state(cid, parsed.emotion, original_text)
 
             # No actions → final answer
             if not parsed.actions:
-                conv.append(uid, "assistant", raw)
-                conv.trim(uid)
+                conv.append(cid, "assistant", raw)
+                conv.trim(cid)
                 final_parsed = parsed
                 break
 
@@ -216,9 +311,9 @@ class Brain:
 
             # Inject tool results back into conversation
             tool_summary = _format_tool_results(tool_results)
-            conv.append(uid, "assistant", raw)
+            conv.append(cid, "assistant", raw)
             conv.append(
-                uid, "user",
+                cid, "user",
                 f"[TOOL RESULTS]\n{tool_summary}\n[/TOOL RESULTS]\n\n"
                 "Now give your final response to the user based on these results. "
                 "Stay in character as Amy.",
@@ -227,12 +322,12 @@ class Brain:
 
         else:
             # Max iterations — use last parsed
-            logger.warning("Agent loop hit max iterations for uid=%d", uid)
-            history = conv.snapshot(uid)
+            logger.warning("Agent loop hit max iterations for chat=%s", cid)
+            history = conv.snapshot(cid)
             raw     = await loop.run_in_executor(None, llm.chat, history)
             final_parsed = parse_response(raw)
-            conv.append(uid, "assistant", raw)
-            conv.trim(uid)
+            conv.append(cid, "assistant", raw)
+            conv.trim(cid)
 
         return BrainResult(
             parsed=final_parsed or ParsedResponse(
@@ -345,6 +440,20 @@ class Brain:
             # ── Reply to ──────────────────────────────────
             elif atype == ActionType.REPLY_TO:
                 return ToolResult(action_type=atype)   # handled by Telegram layer
+
+            # ── Moderation ────────────────────────────────
+            # Deliberately carries NO target from the LLM's params — the
+            # Telegram layer always applies this to whoever actually sent
+            # the message being processed, never a name the model wrote.
+            elif atype in (ActionType.MUTE_USER, ActionType.BAN_USER):
+                if not settings.moderation_enabled:
+                    return ToolResult(action_type=atype, error="Moderation disabled")
+                verb = "muted" if atype == ActionType.MUTE_USER else "banned"
+                return ToolResult(
+                    action_type=atype, params=action.params, internal_only=True,
+                    text=f"You {verb} the person who sent that message. "
+                         "(The actual Telegram action is applied separately.)",
+                )
 
             else:
                 logger.warning("Unknown action: %s", atype)

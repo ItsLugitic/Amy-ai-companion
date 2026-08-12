@@ -65,6 +65,10 @@ class ActionType(str, Enum):
     MAPS           = "maps"
     # Group
     REPLY_TO       = "reply_to"
+    # Moderation — target is ALWAYS resolved by the bot layer from the
+    # actual sender of the message being processed, never from LLM output.
+    MUTE_USER      = "mute_user"
+    BAN_USER       = "ban_user"
 
 
 @dataclass
@@ -104,6 +108,11 @@ class ToolResult:
     text: Optional[str] = None
     image_url: Optional[str] = None
     error: Optional[str] = None
+    params: dict[str, Any] = field(default_factory=dict)
+    # True for tool text that's meant to inform the LLM's NEXT completion
+    # (agent-loop feedback) but should never be sent to the user verbatim —
+    # e.g. the moderation action confirmations.
+    internal_only: bool = False
 
 
 @dataclass
@@ -125,10 +134,10 @@ class BrainResult:
     def image_urls(self) -> list[str]:
         return [tr.image_url for tr in self.tool_results if tr.image_url]
 
-    # Combined text from all text-producing tools
+    # Combined text from all text-producing tools (excludes internal-only notes)
     @property
     def tool_text(self) -> str:
-        parts = [tr.text for tr in self.tool_results if tr.text]
+        parts = [tr.text for tr in self.tool_results if tr.text and not tr.internal_only]
         return "\n\n".join(parts)
 
 
@@ -139,3 +148,12 @@ class UserContext:
     first_name: str = ""
     language_code: str = "en"
     chat_type: str = "private"
+    chat_id: int = 0            # history/memory is scoped to this (shared in groups)
+
+    @property
+    def is_group(self) -> bool:
+        return self.chat_type in ("group", "supergroup")
+
+    @property
+    def display_name(self) -> str:
+        return self.first_name or self.username or str(self.user_id)
