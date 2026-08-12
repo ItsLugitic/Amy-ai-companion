@@ -1,118 +1,232 @@
-# Amy v3 — Modular Tsundere AI Bot
 
-A professional, modular Telegram bot with personality, memory, and multi-tool support.
+می‌خوای همین الان با Amy صحبت کنی؟
 
-## Architecture
+وارد گروه تلگرام شو
 
-```
-amy/
-├── main.py              ← Entry point
-├── config.py            ← All settings from env vars
-├── requirements.txt
-├── railway.json         ← Railway deployment config
-├── .env.example
-│
-├── core/
-│   ├── brain.py         ← Central orchestrator (User → Brain → Tool → LLM → Telegram)
-│   ├── parser.py        ← LLM output parser (emotion, action, text)
-│   ├── conversation.py  ← Per-user message history
-│   ├── emotion_engine.py← Tracks Amy's emotional state per user
-│   └── language.py      ← Language detection (fa / en)
-│
-├── llm/
-│   └── groq_client.py   ← Groq API wrapper with model fallback
-│
-├── memory/
-│   └── manager.py       ← ChromaDB long-term memory (save + retrieve)
-│
-├── tools/
-│   ├── web_search.py    ← SerpAPI / DuckDuckGo search
-│   ├── image_search.py  ← Pixabay photo search
-│   └── image_generate.py← Pollinations.ai image generation
-│
-├── telegram/
-│   └── bot.py           ← Telegram handlers + result dispatcher
-│
-├── personalities/
-│   └── amy.py           ← System prompt + few-shot examples
-│
-└── models/
-    └── schemas.py        ← Shared data models (Emotion, Action, ParsedResponse, ...)
-```
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.11+-blue?logo=python"/>
+  <img src="https://img.shields.io/badge/Railway-Ready-purple"/>
+</p>
 
-## Flow
+<p align="center">
+  <a href="https://discord.gg/yourinvite](https://discord.com/invite/JT4NMvHwr">
+    <img src="https://img.shields.io/badge/Discord-Community-5865F2?logo=discord&logoColor=white"/>
+  </a>
+</p>
+<p align="center">
+  <a href="https://t.me/+QP3G3mc93xNlMTRk">
+    <img src="https://img.shields.io/badge/Try%20Amy%20Live-Telegram-26A5E4?style=for-the-badge&logo=telegram&logoColor=white"/>
+  </a>
+</p>
 
-```
-User Message
+
+# 🤍 Amy — دستیار هوشمند تلگرام
+
+یک **همراه هوشمند برای تلگرام** با حافظه بلندمدت، درک تصویر، تحلیل فایل، ابزارهای وب و مکالمه‌های مبتنی بر شخصیت.
+
+طوری طراحی شده که فقط یک چت‌بات معمولی نباشه؛ بلکه مثل یک همراه رفتار کنه که میتونه مکالمات مهم رو به خاطر بسپره، تصاویر و فایل هارو درک کنه
+
+---
+
+## ✨ قابلیت‌ها
+
+* 🧠 **حافظه بلندمدت** با استفاده از ChromaDB
+* 👁️ **درک و تحلیل تصویر** (اسکرین‌شات، عکس، میم، رابط کاربری و …)
+* 📄 **تحلیل فایل** برای PDF، DOCX، TXT و سایر فرمت‌های پشتیبانی‌شده
+* 🌐 **جستجوی وب** با سیستم جایگزین خودکار در صورت خطا
+* 🖼️ **تولید تصویر** برای ساخت والپیپر، آرت و تصاویر سفارشی
+* 💬 **پشتیبانی از چت خصوصی و گروهی**
+* 🎭 **سیستم شخصیت و احساسات پویا**
+* ⚙️ **معماری ماژولار و قابل توسعه**
+* 🚀 **آماده‌ی استقرار روی Railway**
+
+---
+
+## 🏗️ معماری پروژه
+
+```text
+پیام کاربر
+    ↓
+هندلر تلگرام
     ↓
 Brain.process()
     ↓
-Memory.retrieve_relevant()     ← ChromaDB semantic search
+بازیابی حافظه (ChromaDB)
     ↓
-Build contextual message
+ساخت Context
     ↓
-LLM call (Groq with fallback)
+مسیریاب مدل‌های زبانی (OpenRouter / مدل‌های جایگزین)
     ↓
-parse_response()               ← Extract emotion, action, text
+تحلیل پاسخ مدل
     ↓
-Execute tool? (web_search / send_image / generate_image)
+اجرای ابزارها (وب / تصویر / فایل / ویژن)
     ↓
-BrainResult → Telegram handler → User
+ارسال پاسخ به تلگرام
 ```
 
-## Setup
+---
 
-### 1. Clone and install
+## 📂 ساختار پروژه
+
+```text
+amy/
+├── main.py
+├── config.py
+├── requirements.txt
+├── railway.json
+├── .env.example
+│
+├── core/
+├── handlers/
+├── llm/
+├── memory/
+├── models/
+├── personalities/
+├── storage/
+├── tools/
+└── utils/
+```
+
+---
+
+## 🚀 شروع سریع
+
+### 1. کلون کردن پروژه
+
+```bash
+git clone https://github.com/ItsLugitic/amy-telegram-bot.git
+cd amy-telegram-bot
+```
+
+### 2. ساخت محیط مجازی
+
+```bash
+python -m venv .venv
+
+# ویندوز
+.venv\\Scripts\\activate
+
+# لینوکس / مک
+source .venv/bin/activate
+```
+
+### 3. نصب وابستگی‌ها
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Configure environment
+### 4. تنظیم متغیرهای محیطی
 
-```bash
-cp .env.example .env
-# Fill in your keys in .env
+یک فایل `.env` بر اساس `.env.example` بساز:
+
+```env
+TELEGRAM_TOKEN=your_telegram_bot_token
+OPENROUTER_API_KEY=your_openrouter_api_key
+PIXABAY_API_KEY=your_pixabay_api_key
+SERPAPI_KEY=optional_serpapi_key
 ```
 
-Required:
-- `TELEGRAM_TOKEN` — from @BotFather
-- `GROQ_API_KEY` — from console.groq.com
-
-Optional:
-- `SERPAPI_KEY` — better web search (falls back to DuckDuckGo if missing)
-- `PIXABAY_API_KEY` — real photo search (send_image action)
-
-### 3. Run
+### 5. اجرای ربات
 
 ```bash
 python main.py
 ```
 
-### Deploy to Railway
+---
 
-1. Push to GitHub
-2. Connect repo on railway.app
-3. Set env vars in Railway dashboard
-4. Deploy — `railway.json` handles the rest
+## 🚂 استقرار روی Railway
 
-## LLM Models (fallback order)
+1. پروژه را روی GitHub قرار بده
+2. یک پروژه جدید در Railway بساز
+3. ریپوی GitHub را متصل کن
+4. متغیرهای محیطی لازم را اضافه کن
+5. Deploy را اجرا کن — فایل `railway.json` به‌صورت خودکار برنامه را اجرا می‌کند
 
-1. `gemma2-9b-it` — highest free TPM
-2. `llama-3.1-8b-instant` — fast and lightweight
-3. `llama3-8b-8192` — third fallback
-4. `llama-3.3-70b-versatile` — highest quality, last resort
+---
 
-## Commands
+## 🧩 ابزارهای پشتیبانی‌شده
 
-| Command  | Description                  |
-|----------|------------------------------|
-| /start   | Wake Amy up                  |
-| /reset   | Clear conversation history   |
+| ابزار        | توضیح                             |
+| ------------ | --------------------------------- |
+| جستجوی وب    | جستجوی اطلاعات به‌روز در اینترنت  |
+| جستجوی تصویر | پیدا کردن تصاویر واقعی با Pixabay |
+| تولید تصویر  | ساخت آرت و والپیپر سفارشی         |
+| ویژن         | تحلیل تصاویر و اسکرین‌شات‌ها      |
+| خواندن فایل  | خلاصه‌سازی و تحلیل اسناد          |
+| آب‌وهوا      | دریافت وضعیت فعلی هوا             |
+| نقشه         | ابزارهای ساده موقعیت و نقشه       |
+| ترجمه        | ترجمه بین زبان‌ها                 |
+| یوتیوب       | جستجوی ویدئوهای YouTube           |
+| ویکی‌پدیا    | دریافت خلاصه مقالات ویکی‌پدیا     |
 
-## Adding New Tools
+---
 
-1. Create `tools/your_tool.py` with an async function
-2. Add a new `ActionType` in `models/schemas.py`
-3. Handle the new type in `core/brain.py` → `_execute_action()`
-4. Add it to the system prompt in `personalities/amy.py`
+## 💬 دستورات ربات
+
+| دستور    | توضیح                  |
+| -------- | ---------------------- |
+| `/start` | فعال کردن Amy          |
+| `/reset` | پاک کردن تاریخچه گفتگو |
+
+---
+
+## 🧠 سیستم شخصیت
+
+Amy از یک ماژول اختصاصی شخصیت استفاده می‌کند که این موارد را کنترل می‌کند:
+
+* وضعیت احساسی
+* سبک گفتگو
+* شوخی و رفتار بازیگوشانه
+* ارجاع طبیعی به حافظه‌ها
+* قوانین استفاده از ابزارها
+* ثبات زبانی در مکالمه
+
+شخصیت Amy را می‌توان در فایل `personalities/amy.py` سفارشی‌سازی کرد.
+
+---
+
+## ➕ اضافه کردن ابزار جدید
+
+1. یک ماژول جدید داخل `tools/` بساز
+2. تابع async `run()` را پیاده‌سازی کن
+3. اکشن را در `models/schemas.py` ثبت کن
+4. منطق اجرای آن را در `core/brain.py` اضافه کن
+5. در صورت نیاز، قوانین مربوط به آن ابزار را به پرامپت شخصیت اضافه کن
+
+---
+
+## 📸 نمونه استفاده‌ها
+
+* تحلیل اسکرین‌شات بازی‌ها
+* خلاصه‌سازی فایل PDF
+* ساخت والپیپر به سبک انیمه
+* جستجوی اخبار و اطلاعات جدید در وب
+* به خاطر سپردن سلیقه و ترجیحات کاربر
+* گفتگو طبیعی در گروه‌های تلگرام هنگام منشن شدن
+
+---
+
+## 🛡️ نکات امنیتی
+
+هرگز فایل واقعی `.env` یا کلیدهای API را داخل ریپو Commit نکن.
+
+پروژه شامل `.env.example` است تا تنظیمات به‌صورت امن با دیگران به اشتراک گذاشته شود.
+
+---
+
+## 📜 لایسنس
+
+این پروژه تحت **لایسنس MIT** منتشر می‌شود.
+
+---
+
+## 👨‍💻 سازنده
+
+**Matin (ItsLugitic)**
+
+در حال توسعه **Amy** به‌عنوان یک همراه هوشمند متن‌باز با تمرکز بر **شخصیت، حافظه، ویژن و قابلیت توسعه**.
+
+---
+
+> *«دارم Amy را قابلیت‌به‌قابلیت می‌سازم.»* 🤍
