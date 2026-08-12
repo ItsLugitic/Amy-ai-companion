@@ -1,4 +1,9 @@
-
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.11+-blue?logo=python"/>
+  <img src="https://img.shields.io/badge/Telegram-AI%20Bot-26A5E4?logo=telegram"/>
+  <img src="https://img.shields.io/badge/Railway-Ready-purple"/>
+  <img src="https://img.shields.io/badge/License-MIT-green"/>
+</p>
 می‌خوای همین الان با Amy صحبت کنی؟
 
 وارد گروه تلگرام شو
