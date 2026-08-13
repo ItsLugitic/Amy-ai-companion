@@ -15,7 +15,7 @@
 
 👉 **وارد گروه عمومی تلگرام شو:**
 
-**https://t.me/YourTelegramGroup](https://t.me/+QP3G3mc93xNlMTRk**
+**https://t.me/+QP3G3mc93xNlMTRk**
 
 ---
 
