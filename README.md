@@ -220,5 +220,3 @@ Amy از یک ماژول اختصاصی شخصیت استفاده می‌کند 
 **Built with ❤️ by [Matin / ItsLugitic](https://github.com/ItsLugitic)**
 
 *Building Amy one feature at a time.* 🤍
-
-</div>م.»* 🤍
